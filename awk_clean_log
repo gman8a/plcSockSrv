@@ -1,0 +1,77 @@
+#!/bin/bash
+#- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+#      File: awk_clean_log
+#    Author: Gary Argraves (GLA), Claude (Anthropic)
+#      Date: 2017-07-24 (original), refactored 2026-03-14
+#   Purpose: Remove log entries older than log_period_days from a flat module
+#            log file. Delegates date-line filtering to log_cleaner.awk.
+#     Usage: bash awk_clean_log <rootPath> <moduleName> <log_period_days>
+#            Example: bash awk_clean_log /opt/mic myModule 30
+#  Features: - Writes clean run metadata to clean_log.txt
+#            - Replaces source log in-place via tmp file + cp + rm
+#            - Guards against missing arguments
+#            - Validates input file existence before running awk
+#- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+#--- BEGIN-OF-FILE: awk_clean_log ---
+
+#--- Argument validation
+if [ $# -lt 3 ]; then
+    echo "ERROR Usage: awk_clean_log <rootPath> <moduleName> <log_period_days>"
+    exit 1
+fi
+
+#--- Paths and names derived from arguments
+rootPath=$1/logs
+moduleName=$2
+log_period_days=$3
+logFileName=${moduleName}_log.txt
+inFile=${rootPath}/${logFileName}
+outFile=${rootPath}/${logFileName}.tmp
+cleanLogFile=${rootPath}/clean_log.txt
+
+#--- Date strings
+nowDate=$(date +"%a %m/%d/%Y")   # example: Tue 07/25/2017  (passed to awk)
+today=$(date)
+
+#--- Guard: input file must exist
+if [ ! -f "$inFile" ]; then
+    echo "WARNING awk_clean_log: input file not found: $inFile" >> "$cleanLogFile"
+    exit 0
+fi
+
+#--- Log run metadata to clean_log.txt
+{
+    echo "----------------------------------------------------------"
+    echo "     Todays Date: $today"
+    echo "        rootPath: $rootPath"
+    echo "      moduleName: $moduleName"
+    echo " log_period_days: $log_period_days"
+    echo "     logFileName: $logFileName"
+    echo "          inFile: $inFile"
+    echo "         outFile: $outFile"
+    echo "         nowDate: $nowDate"
+    echo "  INFO Running gawk filter..."
+} >> "$cleanLogFile"
+
+#--- Run AWK filter: emit only records within the retention window
+gawk \
+    -v nowDate="$nowDate" \
+    -v log_period_days="$log_period_days" \
+    -f log_cleaner.awk \
+    "$inFile" > "$outFile"
+
+awk_exit=$?
+
+if [ $awk_exit -ne 0 ]; then
+    echo "ERROR gawk exited with code $awk_exit — original log preserved." >> "$cleanLogFile"
+    rm -f "$outFile"
+    exit $awk_exit
+fi
+
+#--- Replace source log with cleaned output
+cp "$outFile" "$inFile"
+rm  "$outFile"
+
+echo "SUCCESS Cleaned log written: $inFile" >> "$cleanLogFile"
+
+#--- END-OF-FILE: awk_clean_log ---
